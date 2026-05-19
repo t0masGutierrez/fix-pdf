@@ -11,7 +11,7 @@ Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This 
 ## Features
 
 - Sets newly opened PDF views to Fit Height.
-- Applies only once per opened PDF file, so manual zoom changes afterward are not repeatedly overridden.
+- Applies exactly once per opened PDF file, so manual zoom changes afterward are not repeatedly overridden.
 
 ## Installation
 
