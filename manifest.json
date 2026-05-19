@@ -3,7 +3,7 @@
   "name": "Fit PDF",
   "version": "1.0.0",
   "minAppVersion": "1.0.0",
-  "description": "Open PDFs using Fit Height by default in Obsidian.",
+  "description": "Open PDFs using Fit Height by default.",
   "author": "Tomas Gutierrez",
   "authorUrl": "https://github.com/t0masgutierrez",
   "isDesktopOnly": false
