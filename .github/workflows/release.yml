@@ -59,16 +59,27 @@ jobs:
           }
           NODE
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
-          gh release create "$VERSION" main.js manifest.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "$VERSION" \
-            --notes "Release $VERSION."
+          assets=(main.js manifest.json versions.json)
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" \
+              --notes "Release $VERSION."
+          else
+            gh release create "$VERSION" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "$VERSION" \
+              --notes "Release $VERSION."
+          fi
 
       - name: Attest main.js provenance
         uses: actions/attest-build-provenance@v2
