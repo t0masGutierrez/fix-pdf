@@ -6,7 +6,7 @@
 
 Fit PDF is an Obsidian plugin that opens PDF files using Fit Height by default instead of Fit Width.
 
-Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This plugin switches newly opened PDFs to PDF.js `page-height`, so an entire page fits vertically in the reading pane.
+Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This plugin switches newly opened PDFs to `page-height`, so an entire page fits vertically in the reading pane.
 
 ## Features
 
