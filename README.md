@@ -15,7 +15,7 @@ Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This 
 
 ## Installation
 
-1. Download or clone this repository.
+1. Clone this repository.
 2. Copy these files into your vault:
 
    ```text
