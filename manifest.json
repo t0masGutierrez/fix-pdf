@@ -1,7 +1,7 @@
 {
   "id": "fit-pdf",
   "name": "Fit PDF",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.0.0",
   "description": "Open PDFs using Fit Height by default.",
   "author": "Tomas Gutierrez",
