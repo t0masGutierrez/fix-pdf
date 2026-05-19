@@ -1,10 +1,11 @@
 {
   "name": "fit-pdf",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Open PDFs using Fit Height by default in Obsidian.",
   "main": "main.js",
   "scripts": {
-    "test": "node --check main.js && python3 -m json.tool manifest.json >/dev/null && python3 -m json.tool versions.json >/dev/null"
+    "build": "node --check main.js && python3 -m json.tool manifest.json >/dev/null && python3 -m json.tool versions.json >/dev/null",
+    "test": "npm run build"
   },
   "keywords": [
     "obsidian",
