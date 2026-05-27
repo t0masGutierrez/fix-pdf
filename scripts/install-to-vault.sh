@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/install-to-vault.sh /path/to/your/vault
+
+Installs dependencies, validates the plugin, then installs it into the requested vault.
+USAGE
+}
+
+if [[ $# -ne 1 || -z "${1:-}" || "${1:-}" == "/path/to/your/vault" ]]; then
+  usage >&2
+  exit 64
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+VAULT="$1"
+PLUGIN_DIR="$VAULT/.obsidian/plugins/fit-pdf"
+
+printf 'Installing dependencies...\n'
+(cd "$PROJECT_ROOT" && npm install --include=dev)
+
+printf 'Building Fit PDF...\n'
+(cd "$PROJECT_ROOT" && npm run build)
+
+for artifact in main.js manifest.json; do
+  if [[ ! -f "$PROJECT_ROOT/$artifact" ]]; then
+    printf 'Missing %s. Run npm run build from %s first.\n' "$artifact" "$PROJECT_ROOT" >&2
+    exit 66
+  fi
+done
+
+mkdir -p "$PLUGIN_DIR"
+cp "$PROJECT_ROOT/main.js" "$PROJECT_ROOT/manifest.json" "$PLUGIN_DIR/"
+
+if [[ -f "$PROJECT_ROOT/styles.css" ]]; then
+  cp "$PROJECT_ROOT/styles.css" "$PLUGIN_DIR/"
+else
+  rm -f "$PLUGIN_DIR/styles.css"
+fi
+
+rm -f "$PLUGIN_DIR/versions.json"
+
+printf 'Installed Fit PDF to %s\n' "$PLUGIN_DIR"

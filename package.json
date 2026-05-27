@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "build": "node --check main.js && node -e \"const fs=require('fs'); for (const file of ['manifest.json','versions.json']) JSON.parse(fs.readFileSync(file,'utf8'));\"",
-    "test": "npm run build"
+    "install:vault": "scripts/install-to-vault.sh",
+    "test": "npm run build && node --test tests/install-to-vault.test.js"
   },
   "keywords": [
     "obsidian",

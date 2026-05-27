@@ -15,16 +15,14 @@ Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This 
 
 ## Installation
 
-1. Clone this repository.
-2. Copy these files into your vault:
+To install, run these commands:
 
-   ```text
-   YOUR_VAULT/.obsidian/plugins/fit-pdf/main.js
-   YOUR_VAULT/.obsidian/plugins/fit-pdf/manifest.json
-   YOUR_VAULT/.obsidian/plugins/fit-pdf/versions.json
-   ```
+```bash
+git clone https://github.com/t0masGutierrez/fit-pdf.git
+cd fit-pdf
+scripts/install-to-vault.sh "/path/to/your/vault"
+```
 
-3. In Obsidian, open Settings -> Community plugins.
-4. Turn off Restricted mode if needed.
-5. Enable `Fit PDF`.
-6. Reopen a PDF.
+This installs dependencies, builds the plugin, and copies into your vault.
+
+Then reload Obsidian and enable Fit PDF from Community plugins.
