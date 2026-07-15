@@ -18,7 +18,7 @@ fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 VAULT="$1"
-PLUGIN_DIR="$VAULT/.obsidian/plugins/fix-pdf"
+PLUGIN_DIR="$VAULT/.obsidian/plugins/fit-pdf"
 
 printf 'Installing dependencies...\n'
 (cd "$PROJECT_ROOT" && npm install --include=dev)
