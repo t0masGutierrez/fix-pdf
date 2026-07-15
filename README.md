@@ -1,28 +1,32 @@
-# Fit PDF
+# Fix PDF
 
 <p align="center">
-  <img src="assets/logo.png" width="128" alt="Fit PDF icon">
+  <img src="assets/logo.png" width="128" alt="Fix PDF icon">
 </p>
 
-Fit PDF is an Obsidian plugin that opens PDF files with fit height enabled by default instead of fit width.
+Fix PDF is an Obsidian plugin for configuring how PDF files open in Obsidian.
 
-Obsidian's built-in PDF viewer currently initializes PDFs at `page-width`. This plugin switches newly opened PDFs to `page-height`, so an entire page fits vertically in the reading pane.
+By default, Obsidian initializes PDFs at `page-width`. Fix PDF changes the initial fit to height and adds defaults for the PDF sidebar and start position. You can also override those settings for individual PDFs from the open PDF file menu.
 
 ## Features
 
 - Sets newly opened PDF views to fit height.
 - Applies once per opened PDF file, so manual zoom changes afterward are not repeatedly overridden.
+- Selects the PDF sidebar panel on open: none, thumbnails, table of contents, or reveal current page in table of contents.
+- Opens or closes the PDF sidebar by default.
+- Opens PDFs at a specific page or percentage through the document.
+- Adds a per-file `Fix PDF` menu item for PDF-specific overrides.
 
 ## Installation
 
 To install, run these commands:
 
 ```bash
-git clone https://github.com/t0masGutierrez/fit-pdf.git
-cd fit-pdf
+git clone https://github.com/t0masGutierrez/fix-pdf.git
+cd fix-pdf
 scripts/install-to-vault.sh "/path/to/your/vault"
 ```
 
 This installs dependencies, builds the plugin, and copies into your vault.
 
-Then reload Obsidian and enable Fit PDF from Community plugins.
+Then reload Obsidian and enable Fix PDF from Community plugins.

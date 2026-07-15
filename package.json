@@ -1,7 +1,7 @@
 {
-  "name": "fit-pdf",
-  "version": "1.0.3",
-  "description": "Open PDFs using Fit Height by default in Obsidian.",
+  "name": "fix-pdf",
+  "version": "1.1.0",
+  "description": "Configure default PDF zoom, sidebar, and start position behavior in Obsidian.",
   "main": "main.js",
   "scripts": {
     "build": "node scripts/build.js",
@@ -12,7 +12,9 @@
     "obsidian",
     "obsidian-plugin",
     "pdf",
-    "fit-height"
+    "fit-height",
+    "pdf-sidebar",
+    "pdf-settings"
   ],
   "author": "Tomas Gutierrez",
   "license": "MIT",

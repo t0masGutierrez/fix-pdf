@@ -18,12 +18,12 @@ fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 VAULT="$1"
-PLUGIN_DIR="$VAULT/.obsidian/plugins/fit-pdf"
+PLUGIN_DIR="$VAULT/.obsidian/plugins/fix-pdf"
 
 printf 'Installing dependencies...\n'
 (cd "$PROJECT_ROOT" && npm install --include=dev)
 
-printf 'Building Fit PDF...\n'
+printf 'Building Fix PDF...\n'
 (cd "$PROJECT_ROOT" && npm run build)
 
 for artifact in main.js manifest.json; do
@@ -44,4 +44,4 @@ fi
 
 rm -f "$PLUGIN_DIR/versions.json"
 
-printf 'Installed Fit PDF to %s\n' "$PLUGIN_DIR"
+printf 'Installed Fix PDF to %s\n' "$PLUGIN_DIR"

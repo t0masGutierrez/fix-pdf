@@ -1,9 +1,9 @@
 {
-  "id": "fit-pdf",
-  "name": "Fit PDF",
-  "version": "1.0.3",
+  "id": "fix-pdf",
+  "name": "Fix PDF",
+  "version": "1.1.0",
   "minAppVersion": "1.0.0",
-  "description": "Open PDFs using Fit Height by default.",
+  "description": "Configure default PDF zoom, sidebar, and start position behavior.",
   "author": "Tomas Gutierrez",
   "authorUrl": "https://github.com/t0masgutierrez",
   "isDesktopOnly": false

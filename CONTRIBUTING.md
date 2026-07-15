@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Fit PDF.
+Thanks for helping improve Fix PDF.
 
 ## Local checks
 
