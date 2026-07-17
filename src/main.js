@@ -43,7 +43,7 @@ const DEFAULT_FILE_SETTINGS = Object.freeze({
 const ZOOM_OPTIONS = [
   [ZOOM_FIT_HEIGHT, 'Fit height'],
   [ZOOM_FIT_WIDTH, 'Fit width'],
-  [ZOOM_NONE, 'Leave as is'],
+  [ZOOM_NONE, 'Default'],
 ];
 
 const SIDEBAR_MODE_OPTIONS = [
@@ -54,27 +54,46 @@ const SIDEBAR_MODE_OPTIONS = [
 ];
 
 const SIDEBAR_STATE_OPTIONS = [
-  [SIDEBAR_LEAVE, 'Leave as is'],
+  [SIDEBAR_LEAVE, 'Default'],
   [SIDEBAR_OPEN, 'Open'],
   [SIDEBAR_CLOSED, 'Closed'],
 ];
 
 const OPEN_MODE_OPTIONS = [
   [OPEN_NONE, 'None'],
-  [OPEN_PAGE, 'Specific page'],
-  [OPEN_PERCENT, 'Percentage through PDF'],
+  [OPEN_PAGE, 'Page number'],
+  [OPEN_PERCENT, 'Page percentage'],
 ];
+
+const UI_COPY = Object.freeze({
+  zoomOptions: ZOOM_OPTIONS,
+  sidebarStateOptions: SIDEBAR_STATE_OPTIONS,
+  openModeOptions: OPEN_MODE_OPTIONS,
+  descriptions: Object.freeze({
+    zoom: 'Choose the zoom applied when a PDF opens.',
+    sidebarPanel: 'Choose the PDF sidebar panel when a PDF opens.',
+    sidebarState: 'Choose whether the PDF sidebar should open, close, or not change.',
+    startPosition: 'Choose whether a PDF opens at a page number or page percentage.',
+    startPage: 'The page number to open when start position is set to page number.',
+    startPercentage: 'The page percentage to open when start position is set to page percentage.',
+    perFileSettings: 'Use the Fix PDF option in an open PDF file menu to override these defaults for individual PDF.',
+  }),
+});
 
 class FixPdfPlugin extends Plugin {
   async onload() {
     this.applied = new WeakMap();
+    this.pending = new WeakMap();
     this.settingsVersion = 0;
     await this.loadSettings();
 
     this.patchPdfHistory();
     this.addSettingTab(new FixPdfSettingTab(this.app, this));
 
-    const applyAll = () => this.applyToOpenPdfLeaves();
+    const applyAll = () => {
+      this.applyToOpenPdfLeaves();
+      this.applyToActivePdfLeaf();
+    };
 
     this.registerEvent(this.app.workspace.on('file-open', applyAll));
     this.registerEvent(this.app.workspace.on('layout-change', applyAll));
@@ -107,7 +126,9 @@ class FixPdfPlugin extends Plugin {
     await this.saveData(this.settings);
     this.settingsVersion += 1;
     this.applied = new WeakMap();
+    this.pending = new WeakMap();
     this.applyToOpenPdfLeaves();
+    this.applyToActivePdfLeaf();
   }
 
   async updateSettings(patch) {
@@ -190,14 +211,27 @@ class FixPdfPlugin extends Plugin {
   }
 
   applyToOpenPdfLeaves() {
+    const seen = new Set();
     for (const leaf of this.app.workspace.getLeavesOfType('pdf')) {
+      seen.add(leaf);
       this.applyToLeaf(leaf);
     }
+    if (typeof this.app.workspace.iterateAllLeaves === 'function') {
+      this.app.workspace.iterateAllLeaves((leaf) => {
+        if (!seen.has(leaf)) {
+          this.applyToLeaf(leaf);
+        }
+      });
+    }
+  }
+
+  applyToActivePdfLeaf() {
+    this.applyToLeaf(this.app.workspace.activeLeaf);
   }
 
   applyToLeaf(leaf) {
     const view = leaf && leaf.view;
-    if (!view || typeof view.getViewType !== 'function' || view.getViewType() !== 'pdf') return;
+    if (!isPdfView(view)) return;
 
     const filePath = getPdfFilePath(view);
     const applyKey = `${filePath}:${this.settingsVersion}`;
@@ -221,33 +255,107 @@ class FixPdfPlugin extends Plugin {
     const pdfViewer = obsidianPdfViewer && obsidianPdfViewer.pdfViewer;
     const eventBus = obsidianPdfViewer && obsidianPdfViewer.eventBus;
 
-    if (!pdfViewer || !eventBus || this.applied.get(leaf) === applyKey) return;
+    this.applied = this.applied || new WeakMap();
+    this.pending = this.pending || new WeakMap();
+
+    if (!pdfViewer || !eventBus || this.applied.get(leaf) === applyKey || this.pending.get(leaf) === applyKey) return;
 
     const options = getEffectivePdfOptions(this.settings, filePath);
     const readyPromise = pdfViewer.firstPagePromise || (pdfViewer._pagesCapability && pdfViewer._pagesCapability.promise);
-    let positioned = false;
+    const startPositionEnabled = hasStartPosition(options);
+    let positioned = !startPositionEnabled;
+    let landed = !startPositionEnabled;
+    let userMoved = false;
+    let listeningForUserMove = false;
+    let cleanupUserMoveListeners = () => {};
+    this.pending.set(leaf, applyKey);
 
-    const applyOptions = (allowPosition) => {
-      this.applyZoom(pdfViewer, eventBus, options);
+    const stopPositioning = () => {
+      positioned = true;
+      cleanupUserMoveListeners();
+    };
 
-      if (allowPosition && !positioned) {
-        positioned = true;
-        this.applyStartPosition(pdfViewer, eventBus, options);
+    const markApplied = () => {
+      stopPositioning();
+      this.pending.delete(leaf);
+      this.applied.set(leaf, applyKey);
+    };
+
+    const listenForUserMove = () => {
+      if (!startPositionEnabled || userMoved || listeningForUserMove) return;
+
+      const targets = getViewerInteractionTargets(leaf, viewerChild, obsidianPdfViewer, pdfViewer);
+      if (targets.length === 0) return;
+      listeningForUserMove = true;
+
+      const events = ['wheel', 'pointerdown', 'mousedown', 'touchstart', 'keydown'];
+      const listenerOptions = { capture: true, passive: true };
+      const onUserMove = (event) => {
+        if (!landed || positioned) return;
+        if (event && event.isTrusted === false) return;
+
+        userMoved = true;
+        stopPositioning();
+      };
+
+      for (const target of targets) {
+        for (const eventName of events) {
+          target.addEventListener(eventName, onUserMove, listenerOptions);
+        }
       }
 
-      this.applySidebar(obsidianPdfViewer, eventBus, options);
+      cleanupUserMoveListeners = () => {
+        for (const target of targets) {
+          for (const eventName of events) {
+            target.removeEventListener(eventName, onUserMove, listenerOptions);
+          }
+        }
+        cleanupUserMoveListeners = () => {};
+        listeningForUserMove = false;
+      };
+    };
+
+    const applyOptions = (allowPosition, allowSidebarChange, verifyLanding = false) => {
+      if (this.applied.get(leaf) === applyKey) return;
+
+      this.applyZoom(pdfViewer, eventBus, options);
+
+      if (verifyLanding && landed && isStartPositionApplied(pdfViewer, options)) {
+        stopPositioning();
+      } else if (allowPosition && !positioned && !userMoved) {
+        landed = this.applyStartPosition(pdfViewer, eventBus, options);
+        if (landed) {
+          listenForUserMove();
+        }
+      }
+
+      this.applySidebar(obsidianPdfViewer, eventBus, options, allowSidebarChange);
     };
 
     const scheduleOptions = () => {
-      if (this.applied.get(leaf) === applyKey) return;
+      if (this.applied.get(leaf) === applyKey) {
+        this.pending.delete(leaf);
+        return;
+      }
+      if (startPositionEnabled && !isActiveLeaf(this.app && this.app.workspace, leaf)) {
+        this.pending.delete(leaf);
+        return;
+      }
 
-      applyOptions(true);
-      window.setTimeout(() => applyOptions(false), 250);
-      window.setTimeout(() => applyOptions(false), 1000);
+      applyOptions(true, true);
+      window.setTimeout(() => applyOptions(true, false, true), 250);
+      window.setTimeout(() => applyOptions(true, false, true), 1000);
+      window.setTimeout(() => applyOptions(true, false, true), 2500);
+      window.setTimeout(() => applyOptions(true, false, true), 5000);
       window.setTimeout(() => {
-        applyOptions(false);
-        this.applied.set(leaf, applyKey);
-      }, 2500);
+        applyOptions(true, false, true);
+        if (!startPositionEnabled || positioned || isStartPositionApplied(pdfViewer, options)) {
+          markApplied();
+          return;
+        }
+        this.pending.delete(leaf);
+        cleanupUserMoveListeners();
+      }, 10000);
     };
 
     if (readyPromise && typeof readyPromise.then === 'function') {
@@ -283,33 +391,45 @@ class FixPdfPlugin extends Plugin {
 
   applyStartPosition(pdfViewer, eventBus, options) {
     const targetPage = getTargetPage(options, getPdfPageCount(pdfViewer));
-    if (!targetPage) return;
+    if (!targetPage) return true;
 
     try {
-      eventBus.dispatch('pagenumberchanged', {
-        source: this,
-        value: String(targetPage),
-      });
-
+      let attempted = false;
+      if (typeof pdfViewer._setCurrentPageNumber === 'function') {
+        pdfViewer._setCurrentPageNumber(targetPage, true);
+        attempted = true;
+      }
       if (typeof pdfViewer.currentPageNumber === 'number') {
         pdfViewer.currentPageNumber = targetPage;
+        attempted = true;
       }
+      if (typeof pdfViewer.scrollPageIntoView === 'function') {
+        pdfViewer.scrollPageIntoView({ pageNumber: targetPage });
+        attempted = true;
+      }
+      if (typeof pdfViewer.currentPageNumber === 'number') {
+        return pdfViewer.currentPageNumber === targetPage;
+      }
+      return attempted;
     } catch (error) {
       console.warn('fix-pdf: could not set PDF start page', error);
+      return false;
     }
   }
 
-  applySidebar(obsidianPdfViewer, eventBus, options) {
+  applySidebar(obsidianPdfViewer, eventBus, options, allowSidebarChange = true) {
     const sidebar = obsidianPdfViewer && obsidianPdfViewer.pdfSidebar;
     if (!sidebar || typeof sidebar.switchView !== 'function') return;
 
     try {
-      if (options.sidebarMode === SIDEBAR_THUMBNAILS) {
-        sidebar.switchView(1, true);
-      } else if (options.sidebarMode === SIDEBAR_TOC || options.sidebarMode === SIDEBAR_REVEAL) {
-        sidebar.switchView(2, true);
-      } else if (options.sidebarState === SIDEBAR_OPEN && !sidebar.isOpen) {
-        sidebar.switchView(sidebar.active || 1, true);
+      if (allowSidebarChange) {
+        if (options.sidebarMode === SIDEBAR_THUMBNAILS) {
+          sidebar.switchView(1, true);
+        } else if (options.sidebarMode === SIDEBAR_TOC || options.sidebarMode === SIDEBAR_REVEAL) {
+          sidebar.switchView(2, true);
+        } else if (options.sidebarState === SIDEBAR_OPEN && !sidebar.isOpen) {
+          sidebar.switchView(sidebar.active || 1, true);
+        }
       }
 
       if (options.sidebarMode === SIDEBAR_REVEAL) {
@@ -319,13 +439,14 @@ class FixPdfPlugin extends Plugin {
         window.setTimeout(reveal, 1000);
       }
 
-      if (options.sidebarState === SIDEBAR_CLOSED) {
+      if (allowSidebarChange && options.sidebarState === SIDEBAR_CLOSED) {
         sidebar.switchView(0, true);
       }
     } catch (error) {
       console.warn('fix-pdf: could not set PDF sidebar', error);
     }
   }
+
 }
 
 class FixPdfSettingTab extends PluginSettingTab {
@@ -340,7 +461,6 @@ class FixPdfSettingTab extends PluginSettingTab {
     containerEl.createEl('h2', { text: 'Fix PDF' });
 
     renderPdfControls(containerEl, this.plugin.settings, {
-      allowInherit: false,
       inherited: this.plugin.settings,
       onChange: async (patch) => {
         await this.plugin.updateSettings(patch);
@@ -350,7 +470,7 @@ class FixPdfSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Per-file settings')
-      .setDesc('Use the Fix PDF item in an open PDF file menu to override these defaults for one PDF.');
+      .setDesc(UI_COPY.descriptions.perFileSettings);
   }
 }
 
@@ -359,7 +479,7 @@ class FixPdfFileModal extends Modal {
     super(app);
     this.plugin = plugin;
     this.file = file;
-    this.draft = normalizeFileSettings(plugin.settings.files[file.path]);
+    this.draft = getFileSettingsDraft(plugin.settings, file.path);
   }
 
   onOpen() {
@@ -368,37 +488,36 @@ class FixPdfFileModal extends Modal {
 
   render() {
     const { contentEl } = this;
-    const effective = getEffectivePdfOptions(this.plugin.settings, this.file.path);
     contentEl.empty();
-    contentEl.createEl('h2', { text: 'Fix PDF' });
+    const titleEl = contentEl.createEl('h2', { text: 'Fix PDF' });
+    titleEl.style.marginTop = '0';
+    titleEl.style.marginBlockStart = '0';
     contentEl.createEl('p', {
       text: this.file.path,
       cls: 'setting-item-description',
     });
 
     renderPdfControls(contentEl, this.draft, {
-      allowInherit: true,
-      inherited: effective,
+      inherited: this.draft,
       onChange: (patch) => {
-        this.draft = normalizeFileSettings({ ...this.draft, ...patch });
-        this.render();
+        this.draft = getFileSettingsDraft({ ...this.draft, ...patch }, this.file.path);
       },
     });
 
     new Setting(contentEl)
       .addButton((button) => {
         button
-          .setButtonText('Save for this PDF')
+          .setButtonText('Save PDF')
           .setCta()
           .onClick(async () => {
             await this.plugin.setFileSettings(this.file.path, this.draft);
-            new Notice('Fix PDF settings saved for this PDF.');
+            new Notice('Saved PDF settings');
             this.close();
           });
       })
       .addButton((button) => {
         button
-          .setButtonText('Reset file settings')
+          .setButtonText('Reset PDF')
           .onClick(async () => {
             await this.plugin.resetFileSettings(this.file.path);
             new Notice('Fix PDF settings reset for this PDF.');
@@ -409,70 +528,102 @@ class FixPdfFileModal extends Modal {
 }
 
 function renderPdfControls(containerEl, values, options) {
-  const allowInherit = !!options.allowInherit;
   const inherited = options.inherited || DEFAULT_SETTINGS;
-  const openMode = values.openMode === INHERIT ? inherited.openMode : values.openMode;
+  let openMode = values.openMode;
+  let openPage = values.openPage;
+  let openPercent = values.openPercent;
+  let startPageInputEl = null;
+  let startPercentageInputEl = null;
+  const updateStartInputs = (resetInactive) => {
+    if (startPageInputEl) {
+      startPageInputEl.disabled = openMode !== OPEN_PAGE;
+      if (resetInactive && startPageInputEl.disabled) {
+        openPage = DEFAULT_SETTINGS.openPage;
+        startPageInputEl.value = String(openPage);
+      }
+    }
+    if (startPercentageInputEl) {
+      startPercentageInputEl.disabled = openMode !== OPEN_PERCENT;
+      if (resetInactive && startPercentageInputEl.disabled) {
+        openPercent = DEFAULT_SETTINGS.openPercent;
+        startPercentageInputEl.value = String(openPercent);
+      }
+    }
+  };
 
   addDropdownSetting(containerEl, {
     name: 'Zoom',
-    desc: 'Choose the zoom applied when a PDF opens.',
+    desc: UI_COPY.descriptions.zoom,
     value: values.zoomMode,
     options: ZOOM_OPTIONS,
-    allowInherit,
-    inheritedValue: inherited.zoomMode,
     onChange: (zoomMode) => options.onChange({ zoomMode }),
   });
 
   addDropdownSetting(containerEl, {
     name: 'Sidebar panel',
-    desc: 'Choose which PDF sidebar panel to select when a PDF opens.',
+    desc: UI_COPY.descriptions.sidebarPanel,
     value: values.sidebarMode,
     options: SIDEBAR_MODE_OPTIONS,
-    allowInherit,
-    inheritedValue: inherited.sidebarMode,
     onChange: (sidebarMode) => options.onChange({ sidebarMode }),
   });
 
   addDropdownSetting(containerEl, {
     name: 'Sidebar state',
-    desc: 'Choose whether the PDF sidebar should open, close, or be left alone.',
+    desc: UI_COPY.descriptions.sidebarState,
     value: values.sidebarState,
     options: SIDEBAR_STATE_OPTIONS,
-    allowInherit,
-    inheritedValue: inherited.sidebarState,
     onChange: (sidebarState) => options.onChange({ sidebarState }),
   });
 
   addDropdownSetting(containerEl, {
     name: 'Start position',
-    desc: 'Choose whether PDFs open at a page number or percentage through the document.',
+    desc: UI_COPY.descriptions.startPosition,
     value: values.openMode,
     options: OPEN_MODE_OPTIONS,
-    allowInherit,
-    inheritedValue: inherited.openMode,
-    onChange: (mode) => options.onChange({ openMode: mode }),
+    onChange: (mode) => {
+      openMode = mode;
+      updateStartInputs(true);
+      const patch = { openMode: mode };
+      if (mode !== OPEN_PAGE) {
+        patch.openPage = DEFAULT_SETTINGS.openPage;
+      }
+      if (mode !== OPEN_PERCENT) {
+        patch.openPercent = DEFAULT_SETTINGS.openPercent;
+      }
+      options.onChange(patch);
+    },
   });
 
   new Setting(containerEl)
     .setName('Start page')
-    .setDesc('The page to open when start position is set to specific page.')
+    .setDesc(UI_COPY.descriptions.startPage)
     .addText((text) => {
       text
         .setPlaceholder(String(inherited.openPage || 1))
-        .setValue(String(values.openPage || ''))
-        .onChange((value) => options.onChange({ openPage: parsePositiveInteger(value, values.openPage) }));
-      text.inputEl.disabled = openMode !== OPEN_PAGE;
+        .setValue(formatNumberInputValue(values.openPage));
+      startPageInputEl = text.inputEl;
+      updateStartInputs(true);
+      text.inputEl.addEventListener('blur', () => {
+        openPage = parsePositiveInteger(text.inputEl.value, DEFAULT_SETTINGS.openPage);
+        text.setValue(String(openPage));
+        options.onChange({ openPage });
+      });
     });
 
   new Setting(containerEl)
     .setName('Start percentage')
-    .setDesc('The percentage through the PDF to open when start position is set to percentage.')
+    .setDesc(UI_COPY.descriptions.startPercentage)
     .addText((text) => {
       text
         .setPlaceholder(String(inherited.openPercent || 0))
-        .setValue(String(values.openPercent ?? ''))
-        .onChange((value) => options.onChange({ openPercent: parsePercent(value, values.openPercent) }));
-      text.inputEl.disabled = openMode !== OPEN_PERCENT;
+        .setValue(formatNumberInputValue(values.openPercent));
+      startPercentageInputEl = text.inputEl;
+      updateStartInputs(true);
+      text.inputEl.addEventListener('blur', () => {
+        openPercent = parsePercent(text.inputEl.value, DEFAULT_SETTINGS.openPage);
+        text.setValue(String(openPercent));
+        options.onChange({ openPercent });
+      });
     });
 }
 
@@ -481,9 +632,6 @@ function addDropdownSetting(containerEl, config) {
     .setName(config.name)
     .setDesc(config.desc)
     .addDropdown((dropdown) => {
-      if (config.allowInherit) {
-        dropdown.addOption(INHERIT, `Use global setting (${getOptionLabel(config.options, config.inheritedValue)})`);
-      }
       for (const [value, label] of config.options) {
         dropdown.addOption(value, label);
       }
@@ -554,6 +702,19 @@ function getEffectivePdfOptions(settings, filePath) {
   return effective;
 }
 
+function getFileSettingsDraft(settings, filePath) {
+  const effective = getEffectivePdfOptions(settings, filePath);
+
+  return {
+    zoomMode: effective.zoomMode,
+    sidebarMode: effective.sidebarMode,
+    sidebarState: effective.sidebarState,
+    openMode: effective.openMode,
+    openPage: effective.openMode === OPEN_PAGE ? effective.openPage : DEFAULT_SETTINGS.openPage,
+    openPercent: effective.openMode === OPEN_PERCENT ? effective.openPercent : DEFAULT_SETTINGS.openPercent,
+  };
+}
+
 function getTargetPage(options, pagesCount) {
   if (!options || options.openMode === OPEN_NONE) return null;
 
@@ -570,6 +731,36 @@ function getTargetPage(options, pagesCount) {
   return null;
 }
 
+function hasStartPosition(options) {
+  return !!options && (options.openMode === OPEN_PAGE || options.openMode === OPEN_PERCENT);
+}
+
+function isStartPositionApplied(pdfViewer, options) {
+  const targetPage = getTargetPage(options, getPdfPageCount(pdfViewer));
+  if (!targetPage) return true;
+  return typeof pdfViewer.currentPageNumber === 'number' && pdfViewer.currentPageNumber === targetPage;
+}
+
+function getViewerInteractionTargets(leaf, viewerChild, obsidianPdfViewer, pdfViewer) {
+  const targets = [];
+  const addTarget = (target) => {
+    if (!target || targets.includes(target)) return;
+    if (typeof target.addEventListener !== 'function' || typeof target.removeEventListener !== 'function') return;
+    targets.push(target);
+  };
+
+  addTarget(viewerChild && viewerChild.containerEl);
+  addTarget(obsidianPdfViewer && obsidianPdfViewer.containerEl);
+  addTarget(pdfViewer && pdfViewer.container);
+  addTarget(pdfViewer && pdfViewer.viewer);
+  addTarget(pdfViewer && pdfViewer.viewerElement);
+  addTarget(pdfViewer && pdfViewer.div);
+  addTarget(leaf && leaf.view && leaf.view.containerEl);
+  addTarget(leaf && leaf.containerEl);
+
+  return targets;
+}
+
 function getPdfPageCount(pdfViewer) {
   if (!pdfViewer) return 0;
   if (Number.isFinite(pdfViewer.pagesCount)) return pdfViewer.pagesCount;
@@ -581,6 +772,33 @@ function getPdfFilePath(view) {
   return (view.file && view.file.path) || (view.getState && view.getState().file) || '__no_file__';
 }
 
+function isPdfView(view) {
+  if (!view) return false;
+  const filePath = getPdfFilePath(view);
+  if (String(filePath).toLowerCase().endsWith('.pdf')) return true;
+  if (view.file && String(view.file.extension || '').toLowerCase() === 'pdf') return true;
+  return typeof view.getViewType === 'function' && view.getViewType() === 'pdf';
+}
+
+function isActiveLeaf(workspace, leaf) {
+  if (!workspace) return true;
+  if ('activeLeaf' in workspace && workspace.activeLeaf === leaf) return true;
+
+  const viewEl = leaf && leaf.view && leaf.view.containerEl;
+  const leafEl = viewEl && typeof viewEl.closest === 'function'
+    ? viewEl.closest('.workspace-leaf')
+    : null;
+  const fallbackEl = !leafEl && leaf && typeof leaf.getContainer === 'function'
+    ? leaf.getContainer()
+    : leaf && leaf.containerEl;
+  const activeEl = leafEl || fallbackEl;
+
+  if (activeEl && activeEl.classList && activeEl.classList.contains('mod-active')) return true;
+  if (activeEl && typeof activeEl.hasClass === 'function' && activeEl.hasClass('mod-active')) return true;
+
+  return !('activeLeaf' in workspace);
+}
+
 function isPdfFile(file) {
   return !!file && String(file.extension || '').toLowerCase() === 'pdf';
 }
@@ -589,11 +807,6 @@ function normalizeOption(value, options, fallback, allowInherit) {
   if (allowInherit && value === INHERIT) return INHERIT;
   const valid = new Set(options.map(([option]) => option));
   return valid.has(value) ? value : fallback;
-}
-
-function getOptionLabel(options, value) {
-  const option = options.find(([optionValue]) => optionValue === value);
-  return option ? option[1] : value;
 }
 
 function parsePositiveInteger(value, fallback) {
@@ -609,6 +822,10 @@ function parsePercent(value, fallback) {
   return Math.min(100, Math.max(0, parsed));
 }
 
+function formatNumberInputValue(value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
 function clampPage(page, pagesCount) {
   const parsed = parsePositiveInteger(page, 1);
   if (!pagesCount || pagesCount < 1) return parsed;
@@ -617,9 +834,12 @@ function clampPage(page, pagesCount) {
 
 FixPdfPlugin.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
 FixPdfPlugin.DEFAULT_FILE_SETTINGS = DEFAULT_FILE_SETTINGS;
+FixPdfPlugin.UI_COPY = UI_COPY;
 FixPdfPlugin.normalizeSettings = normalizeSettings;
 FixPdfPlugin.normalizeFileSettings = normalizeFileSettings;
 FixPdfPlugin.getEffectivePdfOptions = getEffectivePdfOptions;
+FixPdfPlugin.getFileSettingsDraft = getFileSettingsDraft;
 FixPdfPlugin.getTargetPage = getTargetPage;
+FixPdfPlugin.renderPdfControls = renderPdfControls;
 
 module.exports = FixPdfPlugin;
